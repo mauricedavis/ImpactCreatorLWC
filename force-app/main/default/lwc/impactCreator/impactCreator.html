@@ -1,0 +1,851 @@
+<template>
+    <!-- Loading Spinner -->
+    <template if:true={isLoading}>
+        <lightning-spinner alternative-text="Loading..." size="medium"></lightning-spinner>
+    </template>
+
+    <template if:false={isLoading}>
+        <div class="impact-creator">
+
+            <!-- ═══ Header ═══ -->
+            <div class="creator-header">
+                <div class="header-content">
+                    <lightning-icon icon-name="standard:opportunity" size="medium"></lightning-icon>
+                    <div class="header-text">
+                        <h1 class="slds-text-heading_medium">Create Impact from Case</h1>
+                        <p class="header-subtitle">
+                            <span class="header-pill">{accountName}</span>
+                            <span class="header-pill">Case {caseRecord.CaseNumber}</span>
+                            <span class="header-pill">{caseOwnerName}</span>
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ═══ Progress Path ═══ -->
+            <div class="progress-container">
+                <template for:each={steps} for:item="step" for:index="idx">
+                    <div key={step.value}
+                         class={step.value}
+                         data-step={step.value}
+                         onclick={handleStepClick}>
+                        <div class={_stepClass} data-step-value={step.value}>
+                            <div class="step-indicator">
+                                <template if:true={_isStepComplete}>
+                                    <lightning-icon icon-name="utility:check" size="xx-small" variant="inverse"></lightning-icon>
+                                </template>
+                                <template if:false={_isStepComplete}>
+                                    <span class="step-number">{_stepNumber}</span>
+                                </template>
+                            </div>
+                            <span class="step-label">{step.label}</span>
+                        </div>
+                    </div>
+                </template>
+            </div>
+
+            <!-- Custom step path -->
+            <div class="step-path slds-m-bottom_medium">
+                <div class="step-path-track">
+                    <template for:each={computedSteps} for:item="step">
+                        <button key={step.value}
+                                data-step={step.value}
+                                onclick={handleStepClick}
+                                class={step.itemClass}>
+                            <span class={step.dotClass}></span>
+                            <span class={step.labelClass}>{step.label}</span>
+                        </button>
+                    </template>
+                </div>
+            </div>
+
+            <!-- ═══ STEP 1: Impact Details ═══ -->
+            <template if:true={isDetailsStep}>
+                <div class="step-content">
+                    <div class="section-card">
+                        <div class="section-header">
+                            <lightning-icon icon-name="standard:opportunity" size="small"></lightning-icon>
+                            <h2 class="slds-text-heading_small">Impact Details</h2>
+                        </div>
+
+                        <div class="slds-grid slds-wrap slds-gutters_small">
+                            <!-- Impact Name -->
+                            <div class="slds-col slds-size_1-of-1 slds-medium-size_6-of-12 field-col">
+                                <lightning-input
+                                    label="Impact Name"
+                                    value={impactName}
+                                    data-field="impactName"
+                                    data-validate="details"
+                                    required
+                                    onchange={handleFieldChange}>
+                                </lightning-input>
+                            </div>
+                            <!-- Lead Consultant (display) -->
+                            <div class="slds-col slds-size_1-of-1 slds-medium-size_6-of-12 field-col">
+                                <div class="display-field">
+                                    <span class="display-label">Lead Consultant</span>
+                                    <span class="display-value">{caseOwnerName}</span>
+                                </div>
+                            </div>
+                            <!-- Account Name (display) -->
+                            <div class="slds-col slds-size_1-of-1 slds-medium-size_6-of-12 field-col">
+                                <div class="display-field">
+                                    <span class="display-label">Account Name</span>
+                                    <span class="display-value">{accountName}</span>
+                                </div>
+                            </div>
+                            <!-- Case (display) -->
+                            <div class="slds-col slds-size_1-of-1 slds-medium-size_6-of-12 field-col">
+                                <div class="display-field">
+                                    <span class="display-label">Case</span>
+                                    <span class="display-value">{caseRecord.CaseNumber}</span>
+                                </div>
+                            </div>
+                            <!-- Attribution Date -->
+                            <div class="slds-col slds-size_1-of-1 slds-medium-size_6-of-12 field-col">
+                                <lightning-input
+                                    type="date"
+                                    label="Impact Attribution Date"
+                                    value={attributionDate}
+                                    data-field="attributionDate"
+                                    data-validate="details"
+                                    required
+                                    onchange={handleFieldChange}>
+                                </lightning-input>
+                            </div>
+                            <!-- Stage -->
+                            <div class="slds-col slds-size_1-of-1 slds-medium-size_6-of-12 field-col">
+                                <lightning-combobox
+                                    label="Stage"
+                                    value={stageName}
+                                    options={stageOptions}
+                                    data-field="stageName"
+                                    data-validate="details"
+                                    required
+                                    onchange={handleFieldChange}>
+                                </lightning-combobox>
+                            </div>
+                            <!-- Sales Increase -->
+                            <div class="slds-col slds-size_1-of-1 slds-medium-size_6-of-12 field-col">
+                                <lightning-input
+                                    type="number"
+                                    label="Sales Increase"
+                                    value={salesIncrease}
+                                    data-field="salesIncrease"
+                                    formatter="currency"
+                                    step="0.01"
+                                    onchange={handleFieldChange}>
+                                </lightning-input>
+                            </div>
+                            <!-- Sales Source -->
+                            <div class="slds-col slds-size_1-of-1 slds-medium-size_6-of-12 field-col">
+                                <lightning-combobox
+                                    label="Sales Source"
+                                    value={salesSource}
+                                    options={salesSourceOptions}
+                                    data-field="salesSource"
+                                    onchange={handleFieldChange}>
+                                </lightning-combobox>
+                            </div>
+                            <!-- Jobs Created -->
+                            <div class="slds-col slds-size_1-of-1 slds-medium-size_6-of-12 field-col">
+                                <lightning-input
+                                    type="number"
+                                    label="Jobs Created"
+                                    value={jobsCreated}
+                                    data-field="jobsCreated"
+                                    step="1"
+                                    onchange={handleFieldChange}>
+                                </lightning-input>
+                            </div>
+                            <!-- Jobs Retained -->
+                            <div class="slds-col slds-size_1-of-1 slds-medium-size_6-of-12 field-col">
+                                <lightning-input
+                                    type="number"
+                                    label="Jobs Retained"
+                                    value={jobsRetained}
+                                    data-field="jobsRetained"
+                                    step="1"
+                                    onchange={handleFieldChange}>
+                                </lightning-input>
+                            </div>
+                        </div>
+
+                        <!-- Checkboxes row -->
+                        <div class="slds-grid slds-wrap slds-gutters_small slds-m-top_small checkbox-row">
+                            <div class="slds-col slds-size_1-of-3">
+                                <lightning-input
+                                    type="checkbox"
+                                    label="New Business"
+                                    checked={newBusiness}
+                                    data-field="newBusiness"
+                                    onchange={handleFieldChange}>
+                                </lightning-input>
+                            </div>
+                            <div class="slds-col slds-size_1-of-3">
+                                <lightning-input
+                                    type="checkbox"
+                                    label="Bought Business"
+                                    checked={boughtBusiness}
+                                    data-field="boughtBusiness"
+                                    onchange={handleFieldChange}>
+                                </lightning-input>
+                            </div>
+                            <div class="slds-col slds-size_1-of-3">
+                                <lightning-input
+                                    type="checkbox"
+                                    label="Sold Business"
+                                    checked={soldBusiness}
+                                    data-field="soldBusiness"
+                                    onchange={handleFieldChange}>
+                                </lightning-input>
+                            </div>
+                        </div>
+
+                        <!-- Business Start Date section -->
+                        <div class="business-start-section slds-m-top_medium">
+                            <div class="slds-grid slds-wrap slds-gutters_small">
+                                <div class="slds-col slds-size_1-of-1 slds-medium-size_6-of-12 field-col">
+                                    <div class="display-field">
+                                        <span class="display-label">Business Start Date <strong>(from Account)</strong></span>
+                                        <span class="display-value">{formattedAccountStartDate}</span>
+                                    </div>
+                                </div>
+                                <div class="slds-col slds-size_1-of-1 slds-medium-size_6-of-12 field-col">
+                                    <lightning-input
+                                        type="date"
+                                        label="Enter Business Start Date (Only if different from Account)"
+                                        value={overrideStartDate}
+                                        data-field="overrideStartDate"
+                                        onchange={handleFieldChange}>
+                                    </lightning-input>
+                                </div>
+                                <div class="slds-col slds-size_1-of-1 slds-medium-size_6-of-12 field-col">
+                                    <div class="display-field">
+                                        <span class="display-label">In Business? <strong>(from Account)</strong></span>
+                                        <span class="display-value">{formattedInBusiness}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <template if:true={showStartDateWarning}>
+                                <div class="warning-banner slds-m-top_small">
+                                    <lightning-icon icon-name="utility:warning" variant="warning" size="small"></lightning-icon>
+                                    <div class="warning-text">
+                                        <strong>'In Business?' AND 'Business Start Date' Discrepancy</strong><br/>
+                                        Check the Account associated with this Impact — the 'In Business?' and 'Business Start Date' fields are inconsistent.
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </div>
+            </template>
+
+            <!-- ═══ STEP 2: Capital Sources ═══ -->
+            <template if:true={isSourcesStep}>
+                <div class="step-content">
+                    <!-- Selection panel -->
+                    <div class="section-card">
+                        <div class="section-header">
+                            <lightning-icon icon-name="standard:product" size="small"></lightning-icon>
+                            <h2 class="slds-text-heading_small">Select Capital Sources</h2>
+                            <span class="badge">{selectedSourceCount} selected</span>
+                        </div>
+
+                        <div class="source-search slds-m-bottom_small">
+                            <lightning-input
+                                type="search"
+                                label="Search Capital Sources"
+                                variant="label-hidden"
+                                placeholder="Search by name, family, sub-type, or description..."
+                                value={capitalSourceSearch}
+                                onchange={handleSourceSearch}>
+                            </lightning-input>
+                        </div>
+
+                        <div class="source-table-container">
+                            <table class="slds-table slds-table_cell-buffer slds-table_bordered slds-table_striped source-table">
+                                <thead>
+                                    <tr class="slds-line-height_reset">
+                                        <th scope="col" class="select-col">
+                                            <lightning-input
+                                                type="checkbox"
+                                                label="Select All"
+                                                variant="label-hidden"
+                                                checked={isAllSelected}
+                                                onchange={handleSelectAll}>
+                                            </lightning-input>
+                                        </th>
+                                        <th scope="col"><div class="slds-truncate">Name</div></th>
+                                        <th scope="col"><div class="slds-truncate">Family</div></th>
+                                        <th scope="col"><div class="slds-truncate">Sub-Type</div></th>
+                                        <th scope="col"><div class="slds-truncate">Partner Type</div></th>
+                                        <th scope="col"><div class="slds-truncate">Description</div></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <template for:each={capitalSourcesForDisplay} for:item="cs">
+                                        <tr key={cs.Id} class={cs.rowClass}>
+                                            <td class="select-col">
+                                                <lightning-input
+                                                    type="checkbox"
+                                                    label="Select"
+                                                    variant="label-hidden"
+                                                    checked={cs.isSelected}
+                                                    data-id={cs.Id}
+                                                    onchange={handleToggleSource}>
+                                                </lightning-input>
+                                            </td>
+                                            <td>
+                                                <div class="slds-truncate" title={cs.Name}>{cs.Name}</div>
+                                            </td>
+                                            <td>
+                                                <div class="slds-truncate">{cs.Family}</div>
+                                            </td>
+                                            <td>
+                                                <div class="slds-truncate">{cs.Sub_Type__c}</div>
+                                            </td>
+                                            <td>
+                                                <div class="slds-truncate">{cs.Partner_Type__c}</div>
+                                            </td>
+                                            <td>
+                                                <div class="slds-truncate" title={cs.Description}>{cs.Description}</div>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                            <template if:false={hasCapitalSources}>
+                                <div class="empty-state slds-m-top_medium">
+                                    <p>No capital sources match your search criteria.</p>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Configure selected sources -->
+                    <template if:true={hasSelectedSources}>
+                        <div class="section-card slds-m-top_medium">
+                            <div class="section-header section-header-wrap">
+                                <div class="section-header-left">
+                                    <lightning-icon icon-name="utility:edit" size="small"></lightning-icon>
+                                    <h2 class="slds-text-heading_small">Configure Selected Capital Sources</h2>
+                                </div>
+                                <div class="totals-bar">
+                                    <div class="total-chip">
+                                        <span class="total-chip-label">Impact Total</span>
+                                        <span class="total-chip-value">{formattedSalesIncrease}</span>
+                                    </div>
+                                    <div class="total-chip">
+                                        <span class="total-chip-label">Capital Total</span>
+                                        <span class="total-chip-value">{formattedTotalCapitalAmount}</span>
+                                    </div>
+                                    <div class={capitalDifferenceChipClass}>
+                                        <span class="total-chip-label">Difference</span>
+                                        <span class="total-chip-value">{formattedCapitalDifference}</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <template for:each={capitalSourceLines} for:item="line">
+                                <div key={line.id} class="line-card">
+                                    <div class="line-header">
+                                        <span class="line-title">{line.productName}</span>
+                                        <lightning-button-icon
+                                            icon-name="utility:delete"
+                                            variant="bare"
+                                            alternative-text="Remove"
+                                            data-line-id={line.id}
+                                            onclick={handleRemoveLine}>
+                                        </lightning-button-icon>
+                                    </div>
+                                    <div class="capital-line-fields">
+                                        <div class="capital-field capital-field--amount">
+                                            <lightning-input
+                                                type="number"
+                                                label="Amount"
+                                                value={line.amount}
+                                                data-line-id={line.id}
+                                                data-field="amount"
+                                                formatter="currency"
+                                                step="0.01"
+                                                onchange={handleLineFieldChange}>
+                                            </lightning-input>
+                                        </div>
+                                        <div class="capital-field capital-field--date">
+                                            <lightning-input
+                                                type="date"
+                                                label="Date"
+                                                value={line.serviceDate}
+                                                data-line-id={line.id}
+                                                data-field="serviceDate"
+                                                onchange={handleLineFieldChange}>
+                                            </lightning-input>
+                                        </div>
+                                        <div class="capital-field capital-field--type">
+                                            <lightning-combobox
+                                                label="Type"
+                                                value={line.capitalSourceType}
+                                                options={capitalSourceTypeOptions}
+                                                data-line-id={line.id}
+                                                data-field="capitalSourceType"
+                                                onchange={handleLineFieldChange}>
+                                            </lightning-combobox>
+                                        </div>
+                                        <div class="capital-field capital-field--partner">
+                                            <div class="account-lookup-container">
+                                                <label class="slds-form-element__label">Partner</label>
+                                                <template if:true={line.capitalSourcePartnerName}>
+                                                    <div class="selected-account-pill">
+                                                        <lightning-icon icon-name="standard:account" size="x-small"></lightning-icon>
+                                                        <span class="pill-label">{line.capitalSourcePartnerName}</span>
+                                                        <lightning-button-icon
+                                                            icon-name="utility:close"
+                                                            variant="bare"
+                                                            size="small"
+                                                            alternative-text="Clear"
+                                                            data-line-id={line.id}
+                                                            onclick={handleClearAccount}>
+                                                        </lightning-button-icon>
+                                                    </div>
+                                                </template>
+                                                <template if:false={line.capitalSourcePartnerName}>
+                                                    <lightning-input
+                                                        type="search"
+                                                        label="Search partner organization"
+                                                        variant="label-hidden"
+                                                        placeholder="Search partner..."
+                                                        value={line.accountSearchTerm}
+                                                        data-line-id={line.id}
+                                                        onchange={handleAccountSearch}
+                                                        onblur={handleAccountSearchBlur}>
+                                                    </lightning-input>
+                                                </template>
+                                                <template if:true={line.showAccountDropdown}>
+                                                    <div class="account-dropdown">
+                                                        <template for:each={line.accountSearchResults} for:item="acct">
+                                                            <div key={acct.accountId}
+                                                                 class="account-option"
+                                                                 data-line-id={line.id}
+                                                                 data-account-id={acct.accountId}
+                                                                 data-account-name={acct.name}
+                                                                 onmousedown={handleSelectAccount}>
+                                                                <lightning-icon icon-name="standard:account" size="x-small"></lightning-icon>
+                                                                <span>{acct.name}</span>
+                                                            </div>
+                                                        </template>
+                                                    </div>
+                                                </template>
+                                            </div>
+                                        </div>
+                                        <div class="capital-field capital-field--qty">
+                                            <lightning-input
+                                                type="number"
+                                                label="Qty"
+                                                value={line.quantity}
+                                                data-line-id={line.id}
+                                                data-field="quantity"
+                                                step="1"
+                                                min="1"
+                                                onchange={handleLineFieldChange}>
+                                            </lightning-input>
+                                        </div>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+                </div>
+            </template>
+
+            <!-- ═══ STEP 3: Team Members ═══ -->
+            <template if:true={isTeamStep}>
+                <div class="step-content">
+                    <div class="section-card">
+                        <div class="section-header">
+                            <lightning-icon icon-name="standard:team_member" size="small"></lightning-icon>
+                            <h2 class="slds-text-heading_small">Impact Team Members</h2>
+                            <span class="badge">{teamMembers.length} member(s)</span>
+                        </div>
+
+                        <!-- Add team member search -->
+                        <div class="user-search-container slds-m-bottom_medium">
+                            <div class="slds-form-element">
+                                <label class="slds-form-element__label">Add Team Member</label>
+                                <div class="slds-form-element__control slds-input-has-icon slds-input-has-icon_left">
+                                    <lightning-icon icon-name="utility:search" size="x-small" class="search-icon-pos"></lightning-icon>
+                                    <lightning-input
+                                        type="search"
+                                        label="Search Users"
+                                        variant="label-hidden"
+                                        placeholder="Search by name or email..."
+                                        value={userSearchTerm}
+                                        onchange={handleUserSearch}
+                                        onblur={handleUserSearchBlur}>
+                                    </lightning-input>
+                                </div>
+                            </div>
+                            <template if:true={showUserDropdown}>
+                                <div class="user-dropdown">
+                                    <template for:each={userSearchResults} for:item="user">
+                                        <div key={user.userId}
+                                             class="user-option"
+                                             data-user-id={user.userId}
+                                             onmousedown={handleSelectUser}>
+                                            <lightning-icon icon-name="standard:user" size="small"></lightning-icon>
+                                            <div class="user-option-text">
+                                                <span class="user-name">{user.name}</span>
+                                                <span class="user-title">{user.title}</span>
+                                            </div>
+                                        </div>
+                                    </template>
+                                </div>
+                            </template>
+                        </div>
+
+                        <!-- Split summary bar -->
+                        <div class="split-summary slds-m-bottom_medium">
+                            <div class="split-summary-header">
+                                <span>Value Split Summary</span>
+                                <div>
+                                    <lightning-button
+                                        label="Distribute Evenly"
+                                        variant="neutral"
+                                        icon-name="utility:rows"
+                                        onclick={handleDistributeEvenly}
+                                        class="slds-m-right_x-small">
+                                    </lightning-button>
+                                </div>
+                            </div>
+                            <div class="slds-grid slds-wrap split-grid">
+                                <div class="slds-col slds-size_1-of-2 slds-medium-size_1-of-4 split-item">
+                                    <span class="split-label">Jobs Created</span>
+                                    <div class={jobsCreatedSplitClass}>
+                                        <span class="split-allocated">{teamJobsCreatedTotal}</span>
+                                        <span class="split-divider">/</span>
+                                        <span class="split-total">{jobsCreated}</span>
+                                    </div>
+                                </div>
+                                <div class="slds-col slds-size_1-of-2 slds-medium-size_1-of-4 split-item">
+                                    <span class="split-label">Jobs Retained</span>
+                                    <div class={jobsRetainedSplitClass}>
+                                        <span class="split-allocated">{teamJobsRetainedTotal}</span>
+                                        <span class="split-divider">/</span>
+                                        <span class="split-total">{jobsRetained}</span>
+                                    </div>
+                                </div>
+                                <div class="slds-col slds-size_1-of-2 slds-medium-size_1-of-4 split-item">
+                                    <span class="split-label">Sales Increase</span>
+                                    <div class={salesIncreaseSplitClass}>
+                                        <span class="split-allocated">{teamSalesIncreaseTotal}</span>
+                                        <span class="split-divider">/</span>
+                                        <span class="split-total">{salesIncrease}</span>
+                                    </div>
+                                </div>
+                                <div class="slds-col slds-size_1-of-2 slds-medium-size_1-of-4 split-item">
+                                    <span class="split-label">Capital Formation</span>
+                                    <div class={capitalFormationSplitClass}>
+                                        <span class="split-allocated">{teamCapitalFormationTotal}</span>
+                                        <span class="split-divider">/</span>
+                                        <span class="split-total">{totalCapitalAmount}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Team member cards -->
+                        <template for:each={teamMembers} for:item="member">
+                            <div key={member.id} class="team-member-card">
+                                <div class="team-member-header">
+                                    <div class="team-member-info">
+                                        <lightning-icon icon-name="standard:user" size="small"></lightning-icon>
+                                        <span class="team-member-name">{member.userName}</span>
+                                        <template if:true={member.isFirst}>
+                                            <span class="primary-badge">Primary</span>
+                                        </template>
+                                    </div>
+                                    <div class="team-member-actions">
+                                        <lightning-button
+                                            label="Assign 100%"
+                                            variant="base"
+                                            data-member-id={member.id}
+                                            onclick={handleAssignAll}
+                                            class="slds-m-right_x-small">
+                                        </lightning-button>
+                                        <template if:false={member.isFirst}>
+                                            <lightning-button-icon
+                                                icon-name="utility:delete"
+                                                variant="bare"
+                                                alternative-text="Remove"
+                                                data-member-id={member.id}
+                                                onclick={handleRemoveTeamMember}>
+                                            </lightning-button-icon>
+                                        </template>
+                                    </div>
+                                </div>
+                                <div class="slds-grid slds-wrap slds-gutters_x-small">
+                                    <div class="slds-col slds-size_1-of-1 slds-medium-size_4-of-12 field-col">
+                                        <lightning-combobox
+                                            label="Role"
+                                            value={member.role}
+                                            options={teamRoleOptions}
+                                            data-member-id={member.id}
+                                            data-field="role"
+                                            required
+                                            onchange={handleTeamFieldChange}>
+                                        </lightning-combobox>
+                                    </div>
+                                    <div class="slds-col slds-size_1-of-2 slds-medium-size_2-of-12 field-col">
+                                        <lightning-input
+                                            type="number"
+                                            label="Jobs Created"
+                                            value={member.jobsCreated}
+                                            data-member-id={member.id}
+                                            data-field="jobsCreated"
+                                            step="1"
+                                            onchange={handleTeamFieldChange}>
+                                        </lightning-input>
+                                    </div>
+                                    <div class="slds-col slds-size_1-of-2 slds-medium-size_2-of-12 field-col">
+                                        <lightning-input
+                                            type="number"
+                                            label="Jobs Retained"
+                                            value={member.jobsRetained}
+                                            data-member-id={member.id}
+                                            data-field="jobsRetained"
+                                            step="1"
+                                            onchange={handleTeamFieldChange}>
+                                        </lightning-input>
+                                    </div>
+                                    <div class="slds-col slds-size_1-of-2 slds-medium-size_2-of-12 field-col">
+                                        <lightning-input
+                                            type="number"
+                                            label="Sales Increase"
+                                            value={member.salesIncrease}
+                                            data-member-id={member.id}
+                                            data-field="salesIncrease"
+                                            formatter="currency"
+                                            step="0.01"
+                                            onchange={handleTeamFieldChange}>
+                                        </lightning-input>
+                                    </div>
+                                    <div class="slds-col slds-size_1-of-2 slds-medium-size_2-of-12 field-col">
+                                        <lightning-input
+                                            type="number"
+                                            label="Capital Formation"
+                                            value={member.capitalFormation}
+                                            data-member-id={member.id}
+                                            data-field="capitalFormation"
+                                            formatter="currency"
+                                            step="0.01"
+                                            onchange={handleTeamFieldChange}>
+                                        </lightning-input>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </template>
+
+            <!-- ═══ STEP 4: Review & Create ═══ -->
+            <template if:true={isReviewStep}>
+                <div class="step-content">
+
+                    <!-- Success State -->
+                    <template if:true={isCreated}>
+                        <div class="success-card">
+                            <div class="success-icon-container">
+                                <lightning-icon icon-name="action:approval" size="large"></lightning-icon>
+                            </div>
+                            <h2 class="slds-text-heading_medium slds-m-top_medium">Impact Created Successfully!</h2>
+                            <p class="slds-m-top_small success-details">
+                                <strong>{createdOpportunityName}</strong> has been created with
+                                {createdOliCount} Capital Source(s) and {createdTeamMemberCount} Team Member(s).
+                            </p>
+                            <div class="slds-m-top_large">
+                                <lightning-button
+                                    label="View Impact"
+                                    variant="brand"
+                                    onclick={handleViewImpact}
+                                    class="slds-m-right_small">
+                                </lightning-button>
+                                <lightning-button
+                                    label="Close"
+                                    variant="neutral"
+                                    onclick={handleClose}>
+                                </lightning-button>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- Review State -->
+                    <template if:false={isCreated}>
+                        <!-- Impact Summary -->
+                        <div class="section-card">
+                            <div class="section-header">
+                                <lightning-icon icon-name="standard:opportunity" size="small"></lightning-icon>
+                                <h2 class="slds-text-heading_small">Impact Details</h2>
+                            </div>
+                            <div class="review-grid">
+                                <div class="review-item">
+                                    <span class="review-label">Impact Name</span>
+                                    <span class="review-value">{impactName}</span>
+                                </div>
+                                <div class="review-item">
+                                    <span class="review-label">Account</span>
+                                    <span class="review-value">{accountName}</span>
+                                </div>
+                                <div class="review-item">
+                                    <span class="review-label">Attribution Date</span>
+                                    <span class="review-value">{attributionDate}</span>
+                                </div>
+                                <div class="review-item">
+                                    <span class="review-label">Stage</span>
+                                    <span class="review-value">{stageName}</span>
+                                </div>
+                                <div class="review-item">
+                                    <span class="review-label">Sales Increase</span>
+                                    <span class="review-value">{formattedSalesIncrease}</span>
+                                </div>
+                                <div class="review-item">
+                                    <span class="review-label">Sales Source</span>
+                                    <span class="review-value">{salesSource}</span>
+                                </div>
+                                <div class="review-item">
+                                    <span class="review-label">Jobs Created</span>
+                                    <span class="review-value">{jobsCreated}</span>
+                                </div>
+                                <div class="review-item">
+                                    <span class="review-label">Jobs Retained</span>
+                                    <span class="review-value">{jobsRetained}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Capital Sources Summary -->
+                        <template if:true={hasSelectedSources}>
+                            <div class="section-card slds-m-top_medium">
+                                <div class="section-header">
+                                    <lightning-icon icon-name="standard:product" size="small"></lightning-icon>
+                                    <h2 class="slds-text-heading_small">Capital Sources ({selectedSourceCount})</h2>
+                                    <span class="badge total-badge">Total: {formattedTotalCapitalAmount}</span>
+                                </div>
+                                <table class="slds-table slds-table_cell-buffer slds-table_bordered slds-no-row-hover review-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Name</th>
+                                            <th>Amount</th>
+                                            <th>Date</th>
+                                            <th>Type</th>
+                                            <th>Partner</th>
+                                            <th>Qty</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <template for:each={capitalSourceLines} for:item="line">
+                                            <tr key={line.id}>
+                                                <td>{line.productName}</td>
+                                                <td>{line.amount}</td>
+                                                <td>{line.serviceDate}</td>
+                                                <td>{line.capitalSourceType}</td>
+                                                <td>{line.capitalSourcePartnerName}</td>
+                                                <td>{line.quantity}</td>
+                                            </tr>
+                                        </template>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </template>
+
+                        <!-- Team Members Summary -->
+                        <div class="section-card slds-m-top_medium">
+                            <div class="section-header">
+                                <lightning-icon icon-name="standard:team_member" size="small"></lightning-icon>
+                                <h2 class="slds-text-heading_small">Team Members ({teamMembers.length})</h2>
+                            </div>
+                            <table class="slds-table slds-table_cell-buffer slds-table_bordered slds-no-row-hover review-table">
+                                <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Role</th>
+                                        <th>Jobs Created</th>
+                                        <th>Jobs Retained</th>
+                                        <th>Sales Increase</th>
+                                        <th>Capital Formation</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <template for:each={teamMembers} for:item="member">
+                                        <tr key={member.id}>
+                                            <td>{member.userName}</td>
+                                            <td>{member.role}</td>
+                                            <td>{member.jobsCreated}</td>
+                                            <td>{member.jobsRetained}</td>
+                                            <td>{member.salesIncrease}</td>
+                                            <td>{member.capitalFormation}</td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+
+                            <!-- Split validation warnings -->
+                            <template if:false={allSplitsValid}>
+                                <div class="warning-banner slds-m-top_small">
+                                    <lightning-icon icon-name="utility:warning" variant="warning" size="small"></lightning-icon>
+                                    <div class="warning-text">
+                                        <strong>Split Mismatch</strong> — Team member value totals do not match Impact totals.
+                                        You can still proceed, but the values may need adjustment later.
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+                </div>
+            </template>
+
+            <!-- ═══ Footer Navigation ═══ -->
+            <template if:false={isCreated}>
+                <div class="footer-nav">
+                    <lightning-button
+                        label="Previous"
+                        variant="neutral"
+                        icon-name="utility:chevronleft"
+                        onclick={handlePrev}
+                        disabled={isPrevDisabled}>
+                    </lightning-button>
+
+                    <div class="footer-right">
+                        <template if:false={isNextHidden}>
+                            <lightning-button
+                                label="Next"
+                                variant="brand"
+                                icon-name="utility:chevronright"
+                                icon-position="right"
+                                onclick={handleNext}>
+                            </lightning-button>
+                        </template>
+                        <template if:false={isSubmitHidden}>
+                            <lightning-button
+                                label="Create Impact"
+                                variant="brand"
+                                icon-name="utility:check"
+                                onclick={handleSubmit}
+                                disabled={isSaving}>
+                            </lightning-button>
+                        </template>
+                    </div>
+                </div>
+            </template>
+
+        </div>
+
+        <!-- Saving overlay -->
+        <template if:true={isSaving}>
+            <div class="saving-overlay">
+                <lightning-spinner alternative-text="Creating Impact..." size="medium"></lightning-spinner>
+                <p class="slds-m-top_medium">Creating Impact...</p>
+            </div>
+        </template>
+    </template>
+</template>
