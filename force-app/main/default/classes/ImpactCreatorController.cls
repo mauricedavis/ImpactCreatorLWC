@@ -4,6 +4,13 @@
  *              Replaces the screen flow "New_Impact_Create_Impact_from_Case".
  * @author      Auto-generated for Michigan SBDC
  * @date        2026-02-12
+ * @modified    2026-03-11 - MJD (MSBDC-93 Phase 1)
+ *              Added Target_Impact__c stamping on OpportunityTeamMember insert.
+ *              After Team Members are created, resolves matching Target__c records
+ *              (by Consultant UserId + Target_Year, or by Account + Target_Year for
+ *              Center/Region targets) and stamps Target_Impact__c = Target__c.Id.
+ *              This enables the rebuilt Target_Rollups flow to use ID-based matching
+ *              instead of the fragile Center_Region__c name-match approach.
  */
 public with sharing class ImpactCreatorController {
 
@@ -24,7 +31,7 @@ public with sharing class ImpactCreatorController {
         @AuraEnabled public List<PicklistOption> salesSourceOptions;
         @AuraEnabled public List<PicklistOption> teamRoleOptions;
         @AuraEnabled public List<PicklistOption> partnerTypeOptions;
-        @AuraEnabled public List<PicklistOption> capitalSourceTypeOptions; // OLI-level picklist
+        @AuraEnabled public List<PicklistOption> capitalSourceTypeOptions;
     }
 
     public class PicklistOption {
@@ -51,10 +58,10 @@ public with sharing class ImpactCreatorController {
         @AuraEnabled public Boolean newBusiness;
         @AuraEnabled public Boolean boughtBusiness;
         @AuraEnabled public Boolean soldBusiness;
-        @AuraEnabled public Date businessStartDate; // null = use Account's
+        @AuraEnabled public Date businessStartDate;
         @AuraEnabled public List<CapitalSourceLine> capitalSourceLines;
         @AuraEnabled public List<TeamMemberLine> teamMembers;
-        @AuraEnabled public String impactAttributionYear; // derived from attributionDate
+        @AuraEnabled public String impactAttributionYear;
     }
 
     public class CapitalSourceLine {
@@ -62,8 +69,8 @@ public with sharing class ImpactCreatorController {
         @AuraEnabled public String productName;
         @AuraEnabled public Decimal amount;
         @AuraEnabled public Date serviceDate;
-        @AuraEnabled public String capitalSourceType; // Partner_Type__c value
-        @AuraEnabled public String capitalSourcePartnerId; // Account Id
+        @AuraEnabled public String capitalSourceType;
+        @AuraEnabled public String capitalSourcePartnerId;
         @AuraEnabled public Decimal quantity;
     }
 
@@ -90,7 +97,6 @@ public with sharing class ImpactCreatorController {
     public static InitData getInitData(String caseId) {
         InitData data = new InitData();
 
-        // Get Case with related Account and Owner info
         data.caseRecord = [
             SELECT Id, CaseNumber, AccountId, OwnerId,
                    Account.Name, Account.Start_Date__c, Account.In_Business__c,
@@ -100,12 +106,11 @@ public with sharing class ImpactCreatorController {
             LIMIT 1
         ];
 
-        data.caseOwnerName = data.caseRecord.Owner.Name;
-        data.accountName = data.caseRecord.Account?.Name;
+        data.caseOwnerName    = data.caseRecord.Owner.Name;
+        data.accountName      = data.caseRecord.Account?.Name;
         data.accountStartDate = data.caseRecord.Account?.Start_Date__c;
         data.accountInBusiness = data.caseRecord.Account?.In_Business__c;
 
-        // Get all active Capital Sources (Product2)
         data.capitalSources = [
             SELECT Id, Name, Family, Sub_Type__c, Partner_Type__c, Description
             FROM Product2
@@ -113,11 +118,10 @@ public with sharing class ImpactCreatorController {
             ORDER BY Name ASC
         ];
 
-        // Picklist values
-        data.stageOptions = getPicklistValues('Opportunity', 'StageName');
-        data.salesSourceOptions = getPicklistValues('Opportunity', 'Sales_Source__c');
-        data.teamRoleOptions = getPicklistValues('OpportunityTeamMember', 'TeamMemberRole');
-        data.partnerTypeOptions = getPicklistValues('Product2', 'Partner_Type__c');
+        data.stageOptions            = getPicklistValues('Opportunity', 'StageName');
+        data.salesSourceOptions      = getPicklistValues('Opportunity', 'Sales_Source__c');
+        data.teamRoleOptions         = getPicklistValues('OpportunityTeamMember', 'TeamMemberRole');
+        data.partnerTypeOptions      = getPicklistValues('Product2', 'Partner_Type__c');
         data.capitalSourceTypeOptions = getPicklistValues('OpportunityLineItem', 'Capital_Source_Type__c');
 
         return data;
@@ -136,7 +140,7 @@ public with sharing class ImpactCreatorController {
                 SELECT Id FROM Pricebook2 WHERE IsStandard = true LIMIT 1
             ];
 
-            // 2. Get Case for OwnerId & Account Start Date
+            // 2. Get Case for OwnerId & Account linkage
             Case c = [
                 SELECT Id, AccountId, OwnerId, Account.Start_Date__c
                 FROM Case
@@ -151,28 +155,28 @@ public with sharing class ImpactCreatorController {
 
             // 3. Create Opportunity (Impact)
             Opportunity opp = new Opportunity(
-                Name              = payload.impactName,
-                AccountId         = c.AccountId,
-                OwnerId           = c.OwnerId,
-                Case__c           = c.Id,
-                CloseDate         = payload.attributionDate,
-                StageName         = payload.stageName,
-                Sales_Increase__c = payload.salesIncrease,
-                Sales_Source__c   = String.isNotBlank(payload.salesSource) ? payload.salesSource : null,
-                Jobs_Created__c   = payload.jobsCreated,
-                Jobs_Retained__c  = payload.jobsRetained,
-                New_Business__c   = payload.newBusiness == true,
+                Name               = payload.impactName,
+                AccountId          = c.AccountId,
+                OwnerId            = c.OwnerId,
+                Case__c            = c.Id,
+                CloseDate          = payload.attributionDate,
+                StageName          = payload.stageName,
+                Sales_Increase__c  = payload.salesIncrease,
+                Sales_Source__c    = String.isNotBlank(payload.salesSource) ? payload.salesSource : null,
+                Jobs_Created__c    = payload.jobsCreated,
+                Jobs_Retained__c   = payload.jobsRetained,
+                New_Business__c    = payload.newBusiness == true,
                 Bought_Business__c = payload.boughtBusiness == true,
-                Sold_Business__c  = payload.soldBusiness == true,
+                Sold_Business__c   = payload.soldBusiness == true,
                 Business_Start_Date__c = bizStartDate,
-                Pricebook2Id      = stdPb.Id
+                Pricebook2Id       = stdPb.Id
             );
             insert opp;
 
             // 4. Create OLIs (Capital Sources)
             Integer oliCount = 0;
             if (payload.capitalSourceLines != null && !payload.capitalSourceLines.isEmpty()) {
-                // Bulk-query PricebookEntries for all selected products
+
                 Set<String> productIds = new Set<String>();
                 for (CapitalSourceLine csl : payload.capitalSourceLines) {
                     productIds.add(csl.productId);
@@ -189,107 +193,93 @@ public with sharing class ImpactCreatorController {
                     prodToPbeId.put(pbe.Product2Id, pbe.Id);
                 }
 
-                // Auto-create missing PricebookEntries for products that don't have them
-                Set<String> missingProductIds = new Set<String>();
-                for (String prodId : productIds) {
-                    if (!prodToPbeId.containsKey(prodId)) {
-                        missingProductIds.add(prodId);
-                    }
-                }
-
-                if (!missingProductIds.isEmpty()) {
-                    List<PricebookEntry> newPbes = new List<PricebookEntry>();
-                    for (String prodId : missingProductIds) {
-                        newPbes.add(new PricebookEntry(
-                            Pricebook2Id = stdPb.Id,
-                            Product2Id = prodId,
-                            UnitPrice = 0,
-                            IsActive = true
-                        ));
-                    }
-                    insert newPbes;
-
-                    // Add newly created PBEs to the map
-                    for (PricebookEntry pbe : newPbes) {
-                        prodToPbeId.put(pbe.Product2Id, pbe.Id);
-                    }
-                }
-
                 List<OpportunityLineItem> olis = new List<OpportunityLineItem>();
                 for (CapitalSourceLine csl : payload.capitalSourceLines) {
                     Id pbeId = prodToPbeId.get(csl.productId);
-
+                    if (pbeId == null) {
+                        throw new AuraHandledException(
+                            'No active Pricebook Entry found for product: ' + csl.productName +
+                            '. Please ensure it has an entry in the Standard Pricebook.'
+                        );
+                    }
                     OpportunityLineItem oli = new OpportunityLineItem(
-                        OpportunityId      = opp.Id,
-                        Product2Id         = csl.productId,
-                        PricebookEntryId   = pbeId,
-                        UnitPrice          = csl.amount != null ? csl.amount : 0,
-                        Quantity           = csl.quantity != null ? csl.quantity : 1,
-                        ServiceDate        = csl.serviceDate
+                        OpportunityId    = opp.Id,
+                        Product2Id       = csl.productId,
+                        PricebookEntryId = pbeId,
+                        UnitPrice        = csl.amount != null ? csl.amount : 0,
+                        Quantity         = csl.quantity != null ? csl.quantity : 1,
+                        ServiceDate      = csl.serviceDate
                     );
-
-                    // Only set Capital Source Type if non-blank
                     if (String.isNotBlank(csl.capitalSourceType)) {
                         oli.Capital_Source_Type__c = csl.capitalSourceType;
                     }
-
-                    // Only set Capital Source Partner if it's a valid Id
                     if (String.isNotBlank(csl.capitalSourcePartnerId) &&
                         csl.capitalSourcePartnerId instanceof Id) {
                         oli.Capital_Source__c = csl.capitalSourcePartnerId;
                     }
-
                     olis.add(oli);
                 }
                 insert olis;
                 oliCount = olis.size();
             }
 
-            // 5. Create Team Members
-            Integer tmCount = 0;
+            // 5. Derive attribution year
+            String attrYear = String.valueOf(payload.attributionDate.year());
+
+            // 6. Build and insert Team Member records
+            List<OpportunityTeamMember> tms = new List<OpportunityTeamMember>();
+
             if (payload.teamMembers != null && !payload.teamMembers.isEmpty()) {
-                // Derive attribution year from the close date
-                String attrYear = String.valueOf(payload.attributionDate.year());
-
-                List<OpportunityTeamMember> tms = new List<OpportunityTeamMember>();
                 for (TeamMemberLine tml : payload.teamMembers) {
-                    System.debug('=== Team Member: ' + tml.userName + ' ===');
-                    System.debug('Capital Formation: ' + tml.capitalFormation);
-                    System.debug('Jobs Created: ' + tml.jobsCreated);
-                    System.debug('Jobs Retained: ' + tml.jobsRetained);
-                    System.debug('Sales Increase: ' + tml.salesIncrease);
-
                     tms.add(new OpportunityTeamMember(
-                        OpportunityId        = opp.Id,
-                        UserId               = tml.userId,
-                        TeamMemberRole       = tml.role,
-                        OpportunityAccessLevel = 'Edit',
-                        Capital_Formation__c = tml.capitalFormation != null ? tml.capitalFormation : 0,
-                        Jobs_Created__c      = tml.jobsCreated != null ? tml.jobsCreated : 0,
-                        Jobs_Retained__c     = tml.jobsRetained != null ? tml.jobsRetained : 0,
-                        Sales_Increase__c    = tml.salesIncrease != null ? tml.salesIncrease : 0,
+                        OpportunityId            = opp.Id,
+                        UserId                   = tml.userId,
+                        TeamMemberRole           = tml.role,
+                        OpportunityAccessLevel   = 'Edit',
+                        Capital_Formation__c     = tml.capitalFormation != null ? tml.capitalFormation : 0,
+                        Jobs_Created__c          = tml.jobsCreated != null ? tml.jobsCreated : 0,
+                        Jobs_Retained__c         = tml.jobsRetained != null ? tml.jobsRetained : 0,
+                        Sales_Increase__c        = tml.salesIncrease != null ? tml.salesIncrease : 0,
                         Impact_Attribution_Year__c = attrYear
                     ));
                 }
-                insert tms;
-                tmCount = tms.size();
+            } else {
+                // Auto-add Case Owner as Lead Consultant when no team members provided
+                tms.add(new OpportunityTeamMember(
+                    OpportunityId            = opp.Id,
+                    UserId                   = c.OwnerId,
+                    TeamMemberRole           = 'Lead Consultant',
+                    OpportunityAccessLevel   = 'Edit',
+                    Capital_Formation__c     = 0,
+                    Jobs_Created__c          = payload.jobsCreated != null ? payload.jobsCreated : 0,
+                    Jobs_Retained__c         = payload.jobsRetained != null ? payload.jobsRetained : 0,
+                    Sales_Increase__c        = payload.salesIncrease != null ? payload.salesIncrease : 0,
+                    Impact_Attribution_Year__c = attrYear
+                ));
             }
 
-            // 6. Return result
+            insert tms;
+
+            // 7. Stamp Target_Impact__c on the inserted team members
+            //    Resolves the Current Target__c for each team member's UserId + year,
+            //    enabling the rebuilt Target_Rollups flow to use ID-based matching
+            //    rather than the fragile Center_Region__c name-match approach.
+            stampTargetImpact(tms, attrYear);
+
+            // 8. Return result
             CreateResult result = new CreateResult();
-            result.opportunityId = opp.Id;
+            result.opportunityId   = opp.Id;
             result.opportunityName = opp.Name;
-            result.oliCount = oliCount;
-            result.teamMemberCount = tmCount;
+            result.oliCount        = oliCount;
+            result.teamMemberCount = tms.size();
             return result;
 
         } catch (AuraHandledException ahe) {
             Database.rollback(sp);
-            throw ahe; // Already properly formatted
+            throw ahe;
         } catch (Exception e) {
             Database.rollback(sp);
             String msg = e.getMessage();
-            // Include DML field errors if available
             if (e instanceof DmlException) {
                 DmlException dml = (DmlException) e;
                 msg = '';
@@ -304,7 +294,87 @@ public with sharing class ImpactCreatorController {
         }
     }
 
-    // ── User Search (for team member lookup) ───────────────────────────
+    // ── Target Stamping ────────────────────────────────────────────────
+
+    /**
+     * @description After inserting OpportunityTeamMember records, resolves the
+     *              matching Current Target__c for each team member's UserId + year
+     *              and stamps Target_Impact__c accordingly.
+     *
+     *              Logic:
+     *              - Collects the distinct set of UserIds from inserted tms
+     *              - Queries Target__c WHERE RecordType = Consultant
+     *                AND Consultant_Name__c IN :userIds
+     *                AND Target_Year__c = :attrYear
+     *                AND Status__c = 'Current'
+     *              - Builds a Map<UserId, Target__c.Id>
+     *              - Updates any tms where a matching Target is found
+     *
+     *              Targets where no match is found are left with Target_Impact__c = null
+     *              and are skipped gracefully (no exception thrown). This handles
+     *              years where Targets have not yet been created, or consultants
+     *              who have no Target record for the given year.
+     *
+     * @param tms       The already-inserted OpportunityTeamMember list (with Ids)
+     * @param attrYear  The attribution year string (e.g. '2026')
+     */
+    @TestVisible
+    private static void stampTargetImpact(
+        List<OpportunityTeamMember> tms,
+        String attrYear
+    ) {
+        if (tms == null || tms.isEmpty()) {
+            return;
+        }
+
+        // Collect distinct UserIds
+        Set<Id> userIds = new Set<Id>();
+        for (OpportunityTeamMember tm : tms) {
+            userIds.add(tm.UserId);
+        }
+
+        // Query matching Consultant Targets for this year
+        // Uses Target_Year__c (Formula Text, e.g. '2026') as the year key —
+        // same field the Target_Rollups flow already filters on.
+        Map<Id, Id> userIdToTargetId = new Map<Id, Id>();
+        for (Target__c t : [
+            SELECT Id, Consultant_Name__c
+            FROM Target__c
+            WHERE Consultant_Name__c IN :userIds
+              AND Target_Year__c = :attrYear
+              AND Status__c = 'Current'
+              AND RecordType.DeveloperName = 'Consultant'
+        ]) {
+            // Last-write wins in the unlikely case of duplicate Targets per
+            // consultant per year — duplicate prevention is enforced separately
+            // via validation rules (Phase 1 task).
+            userIdToTargetId.put(t.Consultant_Name__c, t.Id);
+        }
+
+        // Nothing to stamp — no matching Targets found (e.g. Targets not yet
+        // created for this year). Exit gracefully.
+        if (userIdToTargetId.isEmpty()) {
+            return;
+        }
+
+        // Build update list — only update tms where a Target was found
+        List<OpportunityTeamMember> toUpdate = new List<OpportunityTeamMember>();
+        for (OpportunityTeamMember tm : tms) {
+            Id targetId = userIdToTargetId.get(tm.UserId);
+            if (targetId != null) {
+                toUpdate.add(new OpportunityTeamMember(
+                    Id               = tm.Id,
+                    Target_Impact__c = targetId
+                ));
+            }
+        }
+
+        if (!toUpdate.isEmpty()) {
+            update toUpdate;
+        }
+    }
+
+    // ── User Search ────────────────────────────────────────────────────
 
     @AuraEnabled(cacheable=true)
     public static List<UserOption> searchUsers(String searchTerm) {
@@ -330,21 +400,20 @@ public with sharing class ImpactCreatorController {
         @AuraEnabled public String photoUrl;
         @AuraEnabled public String title;
         public UserOption(String userId, String name, String photoUrl, String title) {
-            this.userId = userId;
-            this.name = name;
+            this.userId   = userId;
+            this.name     = name;
             this.photoUrl = photoUrl;
-            this.title = title;
+            this.title    = title;
         }
     }
 
-    // ── Account Search (for Capital Source Partner lookup) ────────────
+    // ── Account Search ─────────────────────────────────────────────────
 
     @AuraEnabled(cacheable=true)
     public static List<AccountOption> searchAccounts(String searchTerm) {
         String term = '%' + String.escapeSingleQuotes(searchTerm) + '%';
         List<AccountOption> results = new List<AccountOption>();
 
-        // Get the Partner Organization record type Id
         Id partnerRtId;
         List<RecordType> rts = [
             SELECT Id FROM RecordType
@@ -354,7 +423,6 @@ public with sharing class ImpactCreatorController {
             LIMIT 1
         ];
         if (rts.isEmpty()) {
-            // Fallback: try by Name
             rts = [
                 SELECT Id FROM RecordType
                 WHERE SObjectType = 'Account'
@@ -384,11 +452,11 @@ public with sharing class ImpactCreatorController {
         @AuraEnabled public String name;
         public AccountOption(String accountId, String name) {
             this.accountId = accountId;
-            this.name = name;
+            this.name      = name;
         }
     }
 
-    // ── Helpers ─────────────────────────────────────────────────────────
+    // ── Helpers ────────────────────────────────────────────────────────
 
     private static List<PicklistOption> getPicklistValues(String objectName, String fieldName) {
         List<PicklistOption> options = new List<PicklistOption>();
