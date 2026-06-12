@@ -136,9 +136,11 @@ public with sharing class ImpactCreatorController {
         Savepoint sp = Database.setSavepoint();
         try {
             // 1. Resolve Pricebook
-            Pricebook2 stdPb = [
-                SELECT Id FROM Pricebook2 WHERE IsStandard = true LIMIT 1
-            ];
+            // Note: querying IsStandard = true returns no rows in test context.
+            // Test.getStandardPricebookId() works in both test and non-test contexts.
+            Id stdPbId = Test.isRunningTest()
+                ? Test.getStandardPricebookId()
+                : [SELECT Id FROM Pricebook2 WHERE IsStandard = true LIMIT 1].Id;
 
             // 2. Get Case for OwnerId & Account linkage
             Case c = [
@@ -169,7 +171,7 @@ public with sharing class ImpactCreatorController {
                 Bought_Business__c = payload.boughtBusiness == true,
                 Sold_Business__c   = payload.soldBusiness == true,
                 Business_Start_Date__c = bizStartDate,
-                Pricebook2Id       = stdPb.Id
+                Pricebook2Id       = stdPbId
             );
             insert opp;
 
@@ -187,7 +189,7 @@ public with sharing class ImpactCreatorController {
                     SELECT Id, Product2Id
                     FROM PricebookEntry
                     WHERE Product2Id IN :productIds
-                      AND Pricebook2Id = :stdPb.Id
+                      AND Pricebook2Id = :stdPbId
                       AND IsActive = true
                 ]) {
                     prodToPbeId.put(pbe.Product2Id, pbe.Id);
