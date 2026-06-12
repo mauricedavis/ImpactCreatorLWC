@@ -123,7 +123,7 @@ private class ImpactCreatorControllerTest {
     static void testCreateImpactAutoCreatesPricebookEntry() {
         Case c = [SELECT Id, OwnerId FROM Case LIMIT 1];
 
-        Product2 newProd = new Product2(Name = 'New Grant Program', IsActive = true, Partner_Type__c = 'Government');
+        Product2 newProd = new Product2(Name = 'New Grant Program', IsActive = true, Partner_Type__c = 'Capital Source Provider');
         insert newProd;
 
         ImpactCreatorController.CreatePayload payload = buildBasePayload(c.Id);
