@@ -118,7 +118,12 @@ public with sharing class ImpactCreatorController {
             ORDER BY Name ASC
         ];
 
-        data.stageOptions            = getPicklistValues('Opportunity', 'StageName');
+        // MSBDC-108: New Impacts cannot be created directly at "Impact Verified" --
+        // that path bypassed Verification_by_manager_only (ISCHANGED() is false on
+        // insert) and enabled self-verification. Excluded here so the wizard never
+        // offers it as a Step 1 starting stage. Block_verified_on_New_Impact (Opportunity
+        // validation rule) remains the server-side backstop if this is ever bypassed.
+        data.stageOptions            = excludeStage(getPicklistValues('Opportunity', 'StageName'), 'Impact Verified');
         data.salesSourceOptions      = getPicklistValues('Opportunity', 'Sales_Source__c');
         data.teamRoleOptions         = getPicklistValues('OpportunityTeamMember', 'TeamMemberRole');
         data.partnerTypeOptions      = getPicklistValues('Product2', 'Partner_Type__c');
@@ -132,6 +137,19 @@ public with sharing class ImpactCreatorController {
     @AuraEnabled
     public static CreateResult createImpact(String payloadJson) {
         CreatePayload payload = (CreatePayload) JSON.deserialize(payloadJson, CreatePayload.class);
+
+        // MSBDC-108: server-side guard, defense in depth against payload tampering --
+        // Step 1 no longer offers "Impact Verified" as a stage option, and
+        // Block_verified_on_New_Impact enforces this at the database layer too, but
+        // this gives a clean, friendly error instead of a raw validation-rule DML
+        // exception if the client payload is ever manipulated to bypass the UI.
+        if (payload.stageName == 'Impact Verified') {
+            String msg = 'New Impacts cannot be created directly at the Impact Verified stage. ' +
+                'Save the Impact at an earlier stage first, then verify it as a separate step.';
+            AuraHandledException ex = new AuraHandledException(msg);
+            ex.setMessage(msg); // required -- the constructor arg alone isn't surfaced via getMessage()
+            throw ex;
+        }
 
         Savepoint sp = Database.setSavepoint();
         try {
@@ -474,5 +492,17 @@ public with sharing class ImpactCreatorController {
             }
         }
         return options;
+    }
+
+    // MSBDC-108: filters a specific value out of a picklist option list -- used to
+    // keep "Impact Verified" from being offered as a Step 1 starting stage.
+    private static List<PicklistOption> excludeStage(List<PicklistOption> options, String valueToExclude) {
+        List<PicklistOption> filtered = new List<PicklistOption>();
+        for (PicklistOption o : options) {
+            if (o.value != valueToExclude) {
+                filtered.add(o);
+            }
+        }
+        return filtered;
     }
 }
