@@ -78,6 +78,15 @@ private class ImpactCreatorControllerTest {
         System.assert(!data.stageOptions.isEmpty(), 'Stage options should not be empty');
         System.assert(!data.salesSourceOptions.isEmpty(), 'Sales Source options should not be empty');
         System.assert(!data.teamRoleOptions.isEmpty(), 'Team Role options should not be empty');
+
+        // MSBDC-108: "Impact Verified" must never be offered as a Step 1 starting stage.
+        Boolean foundImpactVerified = false;
+        for (ImpactCreatorController.PicklistOption opt : data.stageOptions) {
+            if (opt.value == 'Impact Verified') {
+                foundImpactVerified = true;
+            }
+        }
+        System.assert(!foundImpactVerified, 'Impact Verified should be excluded from stageOptions (MSBDC-108)');
     }
 
     @isTest
@@ -111,6 +120,40 @@ private class ImpactCreatorControllerTest {
         Opportunity opp = [SELECT Id, Name, Jobs_Created__c FROM Opportunity WHERE Id = :result.opportunityId];
         System.assertEquals('Test Impact', opp.Name);
         System.assertEquals(5, opp.Jobs_Created__c);
+    }
+
+    /**
+     * MSBDC-108: createImpact() must reject stageName = 'Impact Verified' even if a
+     * tampered client payload sends it directly (Step 1 no longer offers it as an
+     * option, but this is the server-side backstop at the Apex layer).
+     */
+    @isTest
+    static void testCreateImpact_RejectsImpactVerifiedStage() {
+        Case c = [SELECT Id, OwnerId FROM Case LIMIT 1];
+
+        ImpactCreatorController.CreatePayload payload = buildBasePayload(c.Id);
+        payload.stageName = 'Impact Verified';
+
+        Boolean threw = false;
+        String caughtMessage;
+
+        Test.startTest();
+        try {
+            ImpactCreatorController.createImpact(JSON.serialize(payload));
+        } catch (AuraHandledException e) {
+            threw = true;
+            caughtMessage = e.getMessage();
+        }
+        Test.stopTest();
+
+        System.assert(threw, 'createImpact should throw when stageName is Impact Verified');
+        System.assert(
+            caughtMessage.contains('cannot be created directly at the Impact Verified stage'),
+            'Exception message should explain the restriction: ' + caughtMessage
+        );
+
+        Integer oppCount = [SELECT COUNT() FROM Opportunity WHERE Case__c = :c.Id];
+        System.assertEquals(0, oppCount, 'No Opportunity should have been inserted');
     }
 
     @isTest
