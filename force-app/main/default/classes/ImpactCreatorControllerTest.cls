@@ -450,12 +450,6 @@ private class ImpactCreatorControllerTest {
 
     /**
      * Multiple team members on the same Impact — each should get their own
-     * Target_Impact__c stamped if a matching Target exists for their UserId.
-     * One member has a Target, one does not — verifies partial stamping works.
-     */
-    @isTest
-    /**
-     * Multiple team members on the same Impact — each should get their own
      * Consultant_Target_Impact__c stamped if a matching Consultant Target exists
      * for their UserId (one member has one, one does not — partial stamping).
      * Target_Impact__c (Region), by contrast, is derived from the shared Case's
