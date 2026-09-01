@@ -3,15 +3,13 @@
  * @author      Auto-generated for Michigan SBDC
  * @date        2026-02-12
  * @modified    2026-03-11 - MJD (MSBDC-93 Phase 1)
- *              Added test coverage for Target_Impact__c stamping:
- *              - testCreateImpact_StampsTargetImpact: verifies stamp when a
- *                matching Current Consultant Target exists for the year.
- *              - testCreateImpact_NoTargetGraceful: verifies no error when no
- *                matching Target exists (graceful skip).
- *              - testCreateImpact_AutoOwner_StampsTarget: verifies stamp
- *                applies on the auto-owner fallback path.
- *              - testStampTargetImpact_EmptyList: unit-tests the private method
- *                directly via @TestVisible for the empty-input guard.
+ *              Added test coverage for Target_Impact__c stamping.
+ * @modified    2026-09-01 - MJD/Claude (MSBDC-93 Consultant/Region parity fix)
+ *              Updated all stamping tests for the two-field split (Target_Impact__c
+ *              for the Region match, Consultant_Target_Impact__c for the Consultant
+ *              match). Added a Region Account + Target to setup() so the Region
+ *              path has something to resolve. Added
+ *              testStampRegionTargetImpact_EmptyAndNullGuards for the new method.
  */
 @isTest
 private class ImpactCreatorControllerTest {
@@ -20,11 +18,18 @@ private class ImpactCreatorControllerTest {
 
     @TestSetup
     static void setup() {
+        // Region Account -- represents the Center/Region parent (e.g. "West Michigan").
+        // Test Account below points to this via Center_Region__c so
+        // stampRegionTargetImpact() has something to resolve.
+        Account regionAcc = new Account(Name = 'Test Region');
+        insert regionAcc;
+
         // Account
         Account acc = new Account(
-            Name           = 'Test Account',
-            Start_Date__c  = Date.today().addMonths(-6),
-            In_Business__c = true
+            Name             = 'Test Account',
+            Start_Date__c    = Date.today().addMonths(-6),
+            In_Business__c   = true,
+            Center_Region__c = regionAcc.Id
         );
         insert acc;
 
@@ -50,8 +55,9 @@ private class ImpactCreatorControllerTest {
             new PricebookEntry(Pricebook2Id = stdPbId, Product2Id = prod2.Id, UnitPrice = 0, IsActive = true)
         };
 
-        // Consultant Target for the running user, current year
-        // This Target is used by the stamping tests to confirm Target_Impact__c is set.
+        // Consultant Target for the running user, current year.
+        // Used by the Consultant-path stamping tests to confirm
+        // Consultant_Target_Impact__c is set.
         String thisYear = String.valueOf(Date.today().year());
         Target__c consultantTarget = new Target__c(
             Name                   = 'Test Consultant Target ' + thisYear,
@@ -60,6 +66,22 @@ private class ImpactCreatorControllerTest {
             Status__c              = 'Current'
         );
         insert consultantTarget;
+
+        // Region Target for the same year, linked to the Region Account above.
+        // Used by the Region-path stamping tests to confirm Target_Impact__c is set.
+        Id regionRecordTypeId = [
+            SELECT Id FROM RecordType
+            WHERE SObjectType = 'Target__c' AND DeveloperName = 'Region'
+            LIMIT 1
+        ].Id;
+        Target__c regionTarget = new Target__c(
+            Name                    = 'Test Region Target ' + thisYear,
+            RecordTypeId            = regionRecordTypeId,
+            Center_Region_Account__c = regionAcc.Id,
+            Target_Start_Date__c    = Date.newInstance(Date.today().year(), 1, 1),
+            Status__c               = 'Current'
+        );
+        insert regionTarget;
     }
 
     // ── Existing Tests (unchanged) ─────────────────────────────────────
@@ -242,24 +264,28 @@ private class ImpactCreatorControllerTest {
     // ── New Tests: Target_Impact__c Stamping ───────────────────────────
 
     /**
-     * Happy path: a Current Consultant Target exists for the running user
-     * and the Impact's attribution year. Verifies Target_Impact__c is stamped
-     * on the inserted OpportunityTeamMember after createImpact() completes.
+     * Happy path: a Current Consultant Target exists for the running user + year,
+     * and a Current Region Target exists for the Case's Account's Region + year.
+     * Verifies both Target_Impact__c (Region) and Consultant_Target_Impact__c
+     * (Consultant) are stamped on the inserted OpportunityTeamMember.
      */
     @isTest
     static void testCreateImpact_StampsTargetImpact() {
         Case c = [SELECT Id, OwnerId FROM Case LIMIT 1];
 
-        // Confirm the setup Target exists for this year
         String thisYear = String.valueOf(Date.today().year());
-        List<Target__c> targets = [
+        Id expectedConsultantTargetId = [
             SELECT Id FROM Target__c
             WHERE Consultant_Name__c = :c.OwnerId
               AND Target_Year__c = :thisYear
               AND Status__c = 'Current'
-        ];
-        System.assertEquals(1, targets.size(), 'Setup Target should exist for running user + year');
-        Id expectedTargetId = targets[0].Id;
+            LIMIT 1
+        ].Id;
+        Id expectedRegionTargetId = [
+            SELECT Id FROM Target__c
+            WHERE Name = :('Test Region Target ' + thisYear)
+            LIMIT 1
+        ].Id;
 
         ImpactCreatorController.CreatePayload payload = buildBasePayload(c.Id);
         payload.teamMembers = new List<ImpactCreatorController.TeamMemberLine>{
@@ -271,23 +297,28 @@ private class ImpactCreatorControllerTest {
             ImpactCreatorController.createImpact(JSON.serialize(payload));
         Test.stopTest();
 
-        // Verify the stamp was applied
         OpportunityTeamMember tm = [
-            SELECT Id, Target_Impact__c
+            SELECT Id, Target_Impact__c, Consultant_Target_Impact__c
             FROM OpportunityTeamMember
             WHERE OpportunityId = :result.opportunityId
             LIMIT 1
         ];
         System.assertEquals(
-            expectedTargetId,
+            expectedRegionTargetId,
             tm.Target_Impact__c,
-            'Target_Impact__c should be stamped with the matching Consultant Target Id'
+            'Target_Impact__c should be stamped with the matching Region Target Id'
+        );
+        System.assertEquals(
+            expectedConsultantTargetId,
+            tm.Consultant_Target_Impact__c,
+            'Consultant_Target_Impact__c should be stamped with the matching Consultant Target Id'
         );
     }
 
     /**
-     * Graceful skip: no matching Target exists for the team member's user + year.
-     * Verifies createImpact() completes without error and Target_Impact__c = null.
+     * Graceful skip: no matching Target exists for the team member's user + year,
+     * or for the Region + year. Verifies createImpact() completes without error
+     * and both Target_Impact__c and Consultant_Target_Impact__c = null.
      */
     @isTest
     static void testCreateImpact_NoTargetGraceful() {
@@ -308,7 +339,7 @@ private class ImpactCreatorControllerTest {
         System.assertNotEquals(null, result.opportunityId, 'Impact should be created even without a matching Target');
 
         OpportunityTeamMember tm = [
-            SELECT Id, Target_Impact__c
+            SELECT Id, Target_Impact__c, Consultant_Target_Impact__c
             FROM OpportunityTeamMember
             WHERE OpportunityId = :result.opportunityId
             LIMIT 1
@@ -316,27 +347,36 @@ private class ImpactCreatorControllerTest {
         System.assertEquals(
             null,
             tm.Target_Impact__c,
-            'Target_Impact__c should remain null when no matching Target found — no error should be thrown'
+            'Target_Impact__c should remain null when no matching Region Target found — no error should be thrown'
+        );
+        System.assertEquals(
+            null,
+            tm.Consultant_Target_Impact__c,
+            'Consultant_Target_Impact__c should remain null when no matching Consultant Target found — no error should be thrown'
         );
     }
 
     /**
      * Auto-owner path: when no team members are passed, the Case Owner is
-     * auto-assigned as Lead Consultant. Verifies stamping also occurs on this path.
+     * auto-assigned as Lead Consultant. Verifies both stamps also occur on this path.
      */
     @isTest
     static void testCreateImpact_AutoOwner_StampsTarget() {
         Case c = [SELECT Id, OwnerId FROM Case LIMIT 1];
 
         String thisYear = String.valueOf(Date.today().year());
-        List<Target__c> targets = [
+        Id expectedConsultantTargetId = [
             SELECT Id FROM Target__c
             WHERE Consultant_Name__c = :c.OwnerId
               AND Target_Year__c = :thisYear
               AND Status__c = 'Current'
-        ];
-        System.assertEquals(1, targets.size(), 'Setup Target should exist for running user + year');
-        Id expectedTargetId = targets[0].Id;
+            LIMIT 1
+        ].Id;
+        Id expectedRegionTargetId = [
+            SELECT Id FROM Target__c
+            WHERE Name = :('Test Region Target ' + thisYear)
+            LIMIT 1
+        ].Id;
 
         // No teamMembers on payload — triggers auto-owner fallback
         ImpactCreatorController.CreatePayload payload = buildBasePayload(c.Id);
@@ -350,16 +390,21 @@ private class ImpactCreatorControllerTest {
         System.assertEquals(1, result.teamMemberCount, 'Auto-owner should create 1 team member');
 
         OpportunityTeamMember tm = [
-            SELECT Id, Target_Impact__c, TeamMemberRole
+            SELECT Id, Target_Impact__c, Consultant_Target_Impact__c, TeamMemberRole
             FROM OpportunityTeamMember
             WHERE OpportunityId = :result.opportunityId
             LIMIT 1
         ];
         System.assertEquals('Lead Consultant', tm.TeamMemberRole, 'Auto-owner should be Lead Consultant');
         System.assertEquals(
-            expectedTargetId,
+            expectedRegionTargetId,
             tm.Target_Impact__c,
             'Target_Impact__c should be stamped on the auto-owner team member'
+        );
+        System.assertEquals(
+            expectedConsultantTargetId,
+            tm.Consultant_Target_Impact__c,
+            'Consultant_Target_Impact__c should be stamped on the auto-owner team member'
         );
     }
 
@@ -381,16 +426,47 @@ private class ImpactCreatorControllerTest {
     }
 
     /**
+     * Unit test for the @TestVisible stampRegionTargetImpact() method directly.
+     * Passes an empty list, a null list, and a null centerRegionAccountId —
+     * confirms all three guard-clause branches exit cleanly.
+     */
+    @isTest
+    static void testStampRegionTargetImpact_EmptyAndNullGuards() {
+        Test.startTest();
+        ImpactCreatorController.stampRegionTargetImpact(
+            new List<OpportunityTeamMember>(),
+            String.valueOf(Date.today().year()),
+            UserInfo.getUserId() // arbitrary non-null Id, unused since list is empty
+        );
+        ImpactCreatorController.stampRegionTargetImpact(null, '2026', UserInfo.getUserId());
+        ImpactCreatorController.stampRegionTargetImpact(
+            new List<OpportunityTeamMember>{ new OpportunityTeamMember() },
+            '2026',
+            null // null centerRegionAccountId — Account has no Region assigned
+        );
+        Test.stopTest();
+        System.assert(true, 'Empty list, null list, and null Region Account Id should all exit gracefully without error');
+    }
+
+    /**
      * Multiple team members on the same Impact — each should get their own
      * Target_Impact__c stamped if a matching Target exists for their UserId.
      * One member has a Target, one does not — verifies partial stamping works.
      */
     @isTest
+    /**
+     * Multiple team members on the same Impact — each should get their own
+     * Consultant_Target_Impact__c stamped if a matching Consultant Target exists
+     * for their UserId (one member has one, one does not — partial stamping).
+     * Target_Impact__c (Region), by contrast, is derived from the shared Case's
+     * Account, so it should be stamped identically on BOTH team members.
+     */
+    @isTest
     static void testCreateImpact_MultipleTeamMembers_PartialStamp() {
         Case c = [SELECT Id, OwnerId FROM Case LIMIT 1];
 
-        // Running user has a Target (from setup). Create a second active user
-        // with no Target to confirm partial stamping.
+        // Running user has a Consultant Target (from setup). Create a second
+        // active user with no Consultant Target to confirm partial stamping.
         User noTargetUser = [
             SELECT Id FROM User
             WHERE IsActive = true
@@ -400,13 +476,18 @@ private class ImpactCreatorControllerTest {
         ];
 
         String thisYear = String.valueOf(Date.today().year());
-        List<Target__c> targets = [
+        List<Target__c> consultantTargets = [
             SELECT Id FROM Target__c
             WHERE Consultant_Name__c = :c.OwnerId
               AND Target_Year__c = :thisYear
               AND Status__c = 'Current'
         ];
-        Id expectedTargetId = targets.isEmpty() ? null : targets[0].Id;
+        Id expectedConsultantTargetId = consultantTargets.isEmpty() ? null : consultantTargets[0].Id;
+        Id expectedRegionTargetId = [
+            SELECT Id FROM Target__c
+            WHERE Name = :('Test Region Target ' + thisYear)
+            LIMIT 1
+        ].Id;
 
         ImpactCreatorController.CreatePayload payload = buildBasePayload(c.Id);
         payload.teamMembers = new List<ImpactCreatorController.TeamMemberLine>{
@@ -422,7 +503,7 @@ private class ImpactCreatorControllerTest {
         System.assertEquals(2, result.teamMemberCount, 'Should have 2 team members');
 
         List<OpportunityTeamMember> tms = [
-            SELECT Id, UserId, Target_Impact__c
+            SELECT Id, UserId, Target_Impact__c, Consultant_Target_Impact__c
             FROM OpportunityTeamMember
             WHERE OpportunityId = :result.opportunityId
             ORDER BY CreatedDate ASC
@@ -430,17 +511,24 @@ private class ImpactCreatorControllerTest {
         System.assertEquals(2, tms.size(), 'Two team members should be created');
 
         for (OpportunityTeamMember tm : tms) {
+            // Region match is shared across both team members regardless of user.
+            System.assertEquals(
+                expectedRegionTargetId,
+                tm.Target_Impact__c,
+                'Both team members should have the same Target_Impact__c (Region), regardless of user'
+            );
+
             if (tm.UserId == c.OwnerId) {
                 System.assertEquals(
-                    expectedTargetId,
-                    tm.Target_Impact__c,
-                    'Owner team member should have Target_Impact__c stamped'
+                    expectedConsultantTargetId,
+                    tm.Consultant_Target_Impact__c,
+                    'Owner team member should have Consultant_Target_Impact__c stamped'
                 );
             } else {
                 System.assertEquals(
                     null,
-                    tm.Target_Impact__c,
-                    'Second team member with no Target should have null Target_Impact__c'
+                    tm.Consultant_Target_Impact__c,
+                    'Second team member with no Consultant Target should have null Consultant_Target_Impact__c'
                 );
             }
         }
