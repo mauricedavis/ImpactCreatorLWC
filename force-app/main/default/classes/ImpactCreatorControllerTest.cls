@@ -20,8 +20,21 @@ private class ImpactCreatorControllerTest {
     static void setup() {
         // Region Account -- represents the Center/Region parent (e.g. "West Michigan").
         // Test Account below points to this via Center_Region__c so
-        // stampRegionTargetImpact() has something to resolve.
-        Account regionAcc = new Account(Name = 'Test Region');
+        // stampRegionTargetImpact() has something to resolve. Account.Center_Region__c
+        // has an active lookup filter requiring RecordTypeId = 'Center/Region', so
+        // this Account must use that RecordType or the insert of the Test Account
+        // (which sets Center_Region__c) fails with FIELD_FILTER_VALIDATION_EXCEPTION.
+        // NOTE: the org's actual RecordType DeveloperName has a typo --
+        // "Center_Regioin", not "Center_Region". Matched here deliberately.
+        Id centerRegionAcctRecordTypeId = [
+            SELECT Id FROM RecordType
+            WHERE SObjectType = 'Account' AND DeveloperName = 'Center_Regioin'
+            LIMIT 1
+        ].Id;
+        Account regionAcc = new Account(
+            Name         = 'Test Region',
+            RecordTypeId = centerRegionAcctRecordTypeId
+        );
         insert regionAcc;
 
         // Account
