@@ -6,11 +6,24 @@
  * @date        2026-02-12
  * @modified    2026-03-11 - MJD (MSBDC-93 Phase 1)
  *              Added Target_Impact__c stamping on OpportunityTeamMember insert.
- *              After Team Members are created, resolves matching Target__c records
- *              (by Consultant UserId + Target_Year, or by Account + Target_Year for
- *              Center/Region targets) and stamps Target_Impact__c = Target__c.Id.
- *              This enables the rebuilt Target_Rollups flow to use ID-based matching
- *              instead of the fragile Center_Region__c name-match approach.
+ * @modified    2026-09-01 - MJD/Claude (MSBDC-93 Consultant/Region parity fix)
+ *              Corrected a bug where stampTargetImpact() wrote the Consultant Target
+ *              match into Target_Impact__c -- which silently broke the Center/Region
+ *              rollup for every new Impact once Target_Rollups was rebuilt to expect
+ *              Target_Impact__c to point to a Region/Center Target. Two lookup fields
+ *              are now used, since a team member legitimately matches both
+ *              simultaneously:
+ *              - Target_Impact__c: the Region/Center Target, resolved via
+ *                TargetImpactResolver.resolveTargetIds() against the Case's
+ *                Account's parent Region/Center Account (stampRegionTargetImpact()).
+ *                This is a genuinely new capability -- it did not exist before this
+ *                fix, so new Impacts previously never populated this field at all.
+ *              - Consultant_Target_Impact__c: the Consultant Target, resolved via
+ *                the new TargetImpactResolver.resolveConsultantTargetIds() against
+ *                the team member's UserId (stampTargetImpact(), renamed target field
+ *                only -- matching logic unchanged except Status__c = 'Current' is no
+ *                longer filtered, for the same reason it was never filtered in
+ *                resolveTargetIds()).
  */
 public with sharing class ImpactCreatorController {
 
@@ -162,7 +175,8 @@ public with sharing class ImpactCreatorController {
 
             // 2. Get Case for OwnerId & Account linkage
             Case c = [
-                SELECT Id, AccountId, OwnerId, Account.Start_Date__c
+                SELECT Id, AccountId, OwnerId, Account.Start_Date__c,
+                       Account.Center_Region__c
                 FROM Case
                 WHERE Id = :payload.caseId
                 LIMIT 1
@@ -280,10 +294,12 @@ public with sharing class ImpactCreatorController {
 
             insert tms;
 
-            // 7. Stamp Target_Impact__c on the inserted team members
-            //    Resolves the Current Target__c for each team member's UserId + year,
-            //    enabling the rebuilt Target_Rollups flow to use ID-based matching
-            //    rather than the fragile Center_Region__c name-match approach.
+            // 7. Stamp Target_Impact__c (Region/Center) and Consultant_Target_Impact__c
+            //    (Consultant) on the inserted team members. These are two distinct
+            //    lookup fields -- a single team member legitimately contributes to
+            //    both their consultant's personal Target AND their Region/Center's
+            //    Target simultaneously (MSBDC-93 Consultant/Region parity fix).
+            stampRegionTargetImpact(tms, attrYear, c.Account?.Center_Region__c);
             stampTargetImpact(tms, attrYear);
 
             // 8. Return result
@@ -318,8 +334,18 @@ public with sharing class ImpactCreatorController {
 
     /**
      * @description After inserting OpportunityTeamMember records, resolves the
-     *              matching Current Target__c for each team member's UserId + year
-     *              and stamps Target_Impact__c accordingly.
+     *              matching Current Consultant Target__c for each team member's
+     *              UserId + year and stamps Consultant_Target_Impact__c accordingly.
+     *
+     *              NOTE: this stamps Consultant_Target_Impact__c, NOT Target_Impact__c.
+     *              Target_Impact__c is reserved for the Region/Center match (see
+     *              stampRegionTargetImpact() below) -- a single team member
+     *              contributes to both simultaneously, so each needs its own field.
+     *              (Prior to MSBDC-93's Consultant/Region parity fix, this method
+     *              incorrectly wrote the Consultant match into Target_Impact__c,
+     *              which silently broke the Center/Region rollup for every new
+     *              Impact created after the flow was rebuilt to expect Target_Impact__c
+     *              to point to a Region/Center Target.)
      *
      *              Logic:
      *              - Collects the distinct set of UserIds from inserted tms
@@ -330,10 +356,11 @@ public with sharing class ImpactCreatorController {
      *              - Builds a Map<UserId, Target__c.Id>
      *              - Updates any tms where a matching Target is found
      *
-     *              Targets where no match is found are left with Target_Impact__c = null
-     *              and are skipped gracefully (no exception thrown). This handles
-     *              years where Targets have not yet been created, or consultants
-     *              who have no Target record for the given year.
+     *              Targets where no match is found are left with
+     *              Consultant_Target_Impact__c = null and are skipped gracefully (no
+     *              exception thrown). This handles years where Targets have not yet
+     *              been created, or consultants who have no Target record for the
+     *              given year.
      *
      * @param tms       The already-inserted OpportunityTeamMember list (with Ids)
      * @param attrYear  The attribution year string (e.g. '2026')
@@ -353,38 +380,26 @@ public with sharing class ImpactCreatorController {
             userIds.add(tm.UserId);
         }
 
-        // Query matching Consultant Targets for this year
-        // Uses Target_Year__c (Formula Text, e.g. '2026') as the year key —
-        // same field the Target_Rollups flow already filters on.
-        Map<Id, Id> userIdToTargetId = new Map<Id, Id>();
-        for (Target__c t : [
-            SELECT Id, Consultant_Name__c
-            FROM Target__c
-            WHERE Consultant_Name__c IN :userIds
-              AND Target_Year__c = :attrYear
-              AND Status__c = 'Current'
-              AND RecordType.DeveloperName = 'Consultant'
-        ]) {
-            // Last-write wins in the unlikely case of duplicate Targets per
-            // consultant per year — duplicate prevention is enforced separately
-            // via validation rules (Phase 1 task).
-            userIdToTargetId.put(t.Consultant_Name__c, t.Id);
-        }
+        // Resolve matching Consultant Targets for this year via the shared
+        // TargetImpactResolver utility, so new records and backfilled historical
+        // records (BackfillConsultantTargetImpactBatch) resolve identically.
+        Map<String, Id> resolved = TargetImpactResolver.resolveConsultantTargetIds(userIds, new Set<String>{ attrYear });
 
         // Nothing to stamp — no matching Targets found (e.g. Targets not yet
         // created for this year). Exit gracefully.
-        if (userIdToTargetId.isEmpty()) {
+        if (resolved.isEmpty()) {
             return;
         }
 
         // Build update list — only update tms where a Target was found
         List<OpportunityTeamMember> toUpdate = new List<OpportunityTeamMember>();
         for (OpportunityTeamMember tm : tms) {
-            Id targetId = userIdToTargetId.get(tm.UserId);
+            String key = TargetImpactResolver.buildConsultantKey(tm.UserId, attrYear);
+            Id targetId = resolved.get(key);
             if (targetId != null) {
                 toUpdate.add(new OpportunityTeamMember(
-                    Id               = tm.Id,
-                    Target_Impact__c = targetId
+                    Id                          = tm.Id,
+                    Consultant_Target_Impact__c = targetId
                 ));
             }
         }
@@ -392,6 +407,62 @@ public with sharing class ImpactCreatorController {
         if (!toUpdate.isEmpty()) {
             update toUpdate;
         }
+    }
+
+    /**
+     * @description After inserting OpportunityTeamMember records, resolves the
+     *              matching Current Region/Center Target__c for the Case's Account's
+     *              parent Region/Center Account + year, and stamps Target_Impact__c
+     *              on every inserted team member. Uses the same TargetImpactResolver
+     *              utility as BackfillTargetImpactBatch, so new records and
+     *              backfilled historical records resolve identically (MSBDC-93).
+     *
+     *              This is a genuinely new capability as of this fix -- previously,
+     *              new Impacts created via this wizard never had Target_Impact__c
+     *              populated at all, so they were silently excluded from
+     *              Target_Rollups' Center/Region rollup (Find_Region_Impact_Records)
+     *              even after that flow was rebuilt to use ID-based matching.
+     *
+     * @param tms                    The already-inserted OpportunityTeamMember list
+     * @param attrYear               The attribution year string (e.g. '2026')
+     * @param centerRegionAccountId  The Region/Center Account Id, derived from the
+     *                                Case's Account (Account.Center_Region__c). May
+     *                                be null if the client Account has no Region/
+     *                                Center assigned, in which case this is skipped
+     *                                gracefully.
+     */
+    @TestVisible
+    private static void stampRegionTargetImpact(
+        List<OpportunityTeamMember> tms,
+        String attrYear,
+        Id centerRegionAccountId
+    ) {
+        if (tms == null || tms.isEmpty() || centerRegionAccountId == null) {
+            return;
+        }
+
+        Map<String, Id> resolved = TargetImpactResolver.resolveTargetIds(
+            new Set<Id>{ centerRegionAccountId },
+            new Set<String>{ attrYear }
+        );
+
+        Id targetId = resolved.get(TargetImpactResolver.buildKey(centerRegionAccountId, attrYear));
+
+        // No matching Region/Center Target for this year -- skip gracefully, same
+        // as stampTargetImpact() does for the Consultant path.
+        if (targetId == null) {
+            return;
+        }
+
+        List<OpportunityTeamMember> toUpdate = new List<OpportunityTeamMember>();
+        for (OpportunityTeamMember tm : tms) {
+            toUpdate.add(new OpportunityTeamMember(
+                Id               = tm.Id,
+                Target_Impact__c = targetId
+            ));
+        }
+
+        update toUpdate;
     }
 
     // ── User Search ────────────────────────────────────────────────────
